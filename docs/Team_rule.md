@@ -1,4 +1,4 @@
-## OOOO Team Rules
+## 2조 Team Rules
 
 ### 1. 코어 타임
 수업 종료 후 매일 15:20~16시, Zep에 모여서 진행하기
