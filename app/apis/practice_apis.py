@@ -1,122 +1,192 @@
-from fastapi import APIRouter, Path, Query, Body, HTTPException
-from pydantic import BaseModel
+import re
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Path, Response, status
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
 
-router = APIRouter()
+router = APIRouter(prefix="/practice_api", tags=["practice-api"])
 
-# 샘플 데이터
-all_items = [
-    {"id": 1, "name": "apple", "price": 100},
-    {"id": 2, "name": "banana", "price": 200},
-    {"id": 3, "name": "cherry", "price": 300},
+user_list = [
+    {
+        "id": 1,
+        "name": "홍길동",
+        "age": 24,
+        "email": "gildong24@example.com",
+        "password": "Password1234!!",
+    },
+    {
+        "id": 2,
+        "name": "장문복",
+        "age": 21,
+        "email": "moonluck12@example.com",
+        "password": "Check1321!",
+    },
+    {
+        "id": 3,
+        "name": "임우진",
+        "age": 31,
+        "email": "limousine33@example.com",
+        "password": "lwsPAssword12@",
+    },
 ]
 
-# 응답 형식 정의
-class ItemResponse(BaseModel):
+EMAIL_PATTERN = re.compile(
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
+
+
+def validate_email(value: str) -> str:
+    value = value.strip()
+    if not EMAIL_PATTERN.fullmatch(value):
+        raise ValueError("올바른 이메일 형식이 아닙니다.")
+    return value
+
+
+def validate_password(value: str) -> str:
+    if not re.search(r"[a-z]", value):
+        raise ValueError("비밀번호에는 소문자가 1개 이상 포함되어야 합니다.")
+    if not re.search(r"[A-Z]", value):
+        raise ValueError("비밀번호에는 대문자가 1개 이상 포함되어야 합니다.")
+    if not re.search(r"[^A-Za-z0-9\s]", value):
+        raise ValueError("비밀번호에는 특수문자가 1개 이상 포함되어야 합니다.")
+    return value
+
+
+Name = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=2, max_length=10),
+]
+Age = Annotated[int, Field(ge=14)]
+Email = Annotated[str, Field(max_length=30), AfterValidator(validate_email)]
+Password = Annotated[
+    str,
+    Field(min_length=8, max_length=20),
+    AfterValidator(validate_password),
+]
+
+
+class UserResponse(BaseModel):
     id: int
     name: str
-    price: int
-
-# GET /items - 전체 상품 조회
-@router.get(
-    "/items",
-    summary="전체 상품 조회 API",
-    response_model=list[ItemResponse]
-)
-def get_all_items_handler():
-    """모든 상품을 조회합니다."""
-    return all_items
+    age: int
+    email: str
 
 
-# GET /items/search - 상품 검색
-@router.get(
-    "/items/search",
-    summary="상품 검색 API",
-    response_model=list[ItemResponse],
-)
-def search_item_handler(
-    query: str = Query(..., min_length=2)  # 최소 2글자 이상
-):
-    """상품 이름으로 검색합니다."""
-    result = []
-    for item in all_items:
-        if query in item["name"]:
-            result.append(item)
-    return result
+class UserCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Name
+    age: Age
+    email: Email
+    password: Password
 
 
-# GET /items/{item_id} - 단일 상품 조회
-@router.get(
-    "/items/{item_id}",
-    summary="단일 상품 조회 API",
-    response_model=ItemResponse
-)
-def get_item_handler(
-    item_id: int = Path(..., ge=1)  # 1 이상인지 검사
-):
-    """특정 상품을 조회합니다."""
-    for item in all_items:
-        if item["id"] == item_id:
-            return item
+class UserUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
+    age: Age | None = None
+    email: Email | None = None
+    password: Password | None = None
+
+
+def find_user(user_id: int) -> dict:
+    for user in user_list:
+        if user["id"] == user_id:
+            return user
     raise HTTPException(
-        status_code=404,
-        detail="아이템을 찾을 수 없습니다."
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="회원을 찾을 수 없습니다.",
     )
 
 
-# 상품 등록 요청 모델
-class ItemRegisterRequest(BaseModel):
-    name: str
-    price: int
+def email_is_already_registered(email: str, excluded_user_id: int | None = None) -> bool:
+    return any(
+        user["id"] != excluded_user_id
+        and user["email"].casefold() == email.casefold()
+        for user in user_list
+    )
 
 
-# POST /items - 상품 등록
+@router.get(
+    "/users",
+    response_model=list[UserResponse],
+    summary="모든 회원 조회",
+)
+def get_users() -> list[dict]:
+    return user_list
+
+
+@router.get(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    summary="특정 회원 조회",
+)
+def get_user(user_id: Annotated[int, Path(description="조회할 회원의 ID")]) -> dict:
+    return find_user(user_id)
+
+
 @router.post(
-    "/items",
-    summary="상품 등록 API",
-    status_code=201,  # 새로운 리소스 생성
-    response_model=ItemResponse,
+    "/users",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="회원 등록",
 )
-def register_item_handler(
-    body: ItemRegisterRequest
-):
-    """새로운 상품을 등록합니다."""
-    new_item = {
-        "id": len(all_items) + 1,  # 기본키는 서버에서 발급
-        "name": body.name,
-        "price": body.price,
+def create_user(body: UserCreateRequest) -> dict:
+    if email_is_already_registered(body.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미 등록된 이메일입니다.",
+        )
+
+    new_user = {
+        "id": max((user["id"] for user in user_list), default=0) + 1,
+        **body.model_dump(),
     }
-    all_items.append(new_item)
-    return new_item
+    user_list.append(new_user)
+    return new_user
 
 
-# 상품 수정 요청 모델
-class ItemUpdateRequest(BaseModel):
-    name: str | None = None
-    price: int | None = None
-
-
-# PATCH /items/{item_id} - 상품 부분 수정
 @router.patch(
-    "/items/{item_id}",
-    summary="상품 수정 API",
-    response_model=ItemResponse,
+    "/users/{user_id}",
+    response_model=UserResponse,
+    summary="회원 정보 수정",
 )
-def update_item_handler(
-    item_id: int = Path(..., ge=1),
-    body: ItemUpdateRequest = Body(...),
-):
-    """기존 상품을 부분 수정합니다."""
-    for item in all_items:
-        if item["id"] == item_id:
-            if body.name:
-                item["name"] = body.name
-            if body.price:
-                item["price"] = body.price
-            return item
+def update_user(
+    user_id: Annotated[int, Path(description="수정할 회원의 ID")],
+    body: UserUpdateRequest,
+) -> dict:
+    user = find_user(user_id)
+    updates = body.model_dump(exclude_unset=True, exclude_none=True)
 
-    raise HTTPException(
-        status_code=404,
-        detail="아이템을 찾을 수 없습니다."
-    )
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="수정할 항목을 하나 이상 입력해야 합니다.",
+        )
+
+    if "email" in updates and email_is_already_registered(
+        updates["email"], excluded_user_id=user_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미 등록된 이메일입니다.",
+        )
+
+    user.update(updates)
+    return user
+
+
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="회원 삭제",
+)
+def delete_user(
+    user_id: Annotated[int, Path(description="삭제할 회원의 ID")],
+) -> Response:
+    user = find_user(user_id)
+    user_list.remove(user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
