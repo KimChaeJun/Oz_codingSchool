@@ -11,8 +11,8 @@ class XrayImage(Base):
     record_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("medical_records.id", ondelete="CASCADE"), nullable=False
     )
-    uploader_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.uuid", ondelete="SET NULL"), nullable=True
+    uploader_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     image_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     shooting_datetime: Mapped[datetime] = mapped_column(DateTime, nullable=False)

@@ -200,7 +200,7 @@ ai_health
 
 ### DBeaver 스크린샷
 
-![DBeaver 스키마 확인](./스키마캡처.png)
+![DB 스키마 확인](./DB%20스키마.png)
 
 ---
 
@@ -280,7 +280,7 @@ alembic upgrade head
 ### Foreign Key 관계
 - `medical_records.patient_id` → `patients.id` (CASCADE DELETE)
 - `xray_images.record_id` → `medical_records.id` (CASCADE DELETE)
-- `xray_images.uploader_id` → `users.uuid` (SET NULL DELETE)
+- `xray_images.uploader_id` → `users.id` (SET NULL DELETE)
 - `ai_analysis_results.record_id` → `medical_records.id` (CASCADE DELETE)
 
 ### 테이블 크기

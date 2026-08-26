@@ -1,9 +1,9 @@
 from enum import Enum
-from sqlalchemy import String, Boolean, DateTime, Enum as SQLEnum
+from sqlalchemy import String, Boolean, DateTime, Enum as SQLEnum, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime, UTC
 from app.core.db.databases import Base
-from app.core.db.models import UUIDMixin, TimestampMixin
+from app.core.db.models import TimestampMixin
 
 
 class GenderEnum(str, Enum):
@@ -23,9 +23,10 @@ class DepartmentEnum(str, Enum):
     RESEARCH = "RESEARCH"
 
 
-class User(Base, UUIDMixin, TimestampMixin):
+class User(Base, TimestampMixin):
     __tablename__ = "users"
 
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(20), nullable=False)

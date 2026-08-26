@@ -32,6 +32,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('users',
+    sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('email', sa.String(length=255), nullable=False),
     sa.Column('hashed_password', sa.String(length=255), nullable=False),
     sa.Column('name', sa.String(length=20), nullable=False),
@@ -40,10 +41,9 @@ def upgrade() -> None:
     sa.Column('department', sa.Enum('MEDICAL', 'DEV', 'RESEARCH', name='departmentenum'), nullable=False),
     sa.Column('role', sa.Enum('PENDING', 'STAFF', 'ADMIN', name='roleenum'), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
-    sa.Column('uuid', mysql.CHAR(length=36), nullable=False),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('current_timestamp(0)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('current_timestamp(0)'), nullable=True),
-    sa.PrimaryKeyConstraint('uuid'),
+    sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('email'),
     sa.UniqueConstraint('phone_number')
     )
@@ -73,12 +73,12 @@ def upgrade() -> None:
     op.create_table('xray_images',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('record_id', sa.BigInteger(), nullable=False),
-    sa.Column('uploader_id', sa.String(length=36), nullable=True),
+    sa.Column('uploader_id', sa.BigInteger(), nullable=True),
     sa.Column('image_url', sa.String(length=2048), nullable=False),
     sa.Column('shooting_datetime', sa.DateTime(), nullable=False),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('current_timestamp(0)'), nullable=False),
     sa.ForeignKeyConstraint(['record_id'], ['medical_records.id'], ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['uploader_id'], ['users.uuid'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['uploader_id'], ['users.id'], ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id')
     )
     # ### end Alembic commands ###
