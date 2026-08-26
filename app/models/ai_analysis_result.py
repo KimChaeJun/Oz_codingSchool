@@ -1,3 +1,4 @@
+from decimal import Decimal
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Numeric, String, func
@@ -16,7 +17,7 @@ class AiAnalysisResult(Base):
         nullable=False,
     )
     is_pneumonia: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    confidence: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     heatmap_url: Mapped[str] = mapped_column(String(255), nullable=False)
     ai_model: Mapped[str] = mapped_column(String(50), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
