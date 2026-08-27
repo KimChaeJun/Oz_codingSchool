@@ -1,35 +1,27 @@
-from typing import TYPE_CHECKING
+from datetime import datetime
 
-from sqlalchemy import BigInteger, Enum, SmallInteger, String
+from sqlalchemy import BigInteger, DateTime, Enum, SmallInteger, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db.databases import Base
-from app.core.db.models import TimestampMixin
-from app.models.enums import Gender
-
-if TYPE_CHECKING:
-    from app.models.medical_record import MedicalRecord
+from app.models.user import Gender
 
 
-class Patient(TimestampMixin, Base):
+class Patient(Base):
     __tablename__ = "patients"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(
-        String(30), nullable=False, comment="환자 성명"
+    name: Mapped[str] = mapped_column(String(30), nullable=False)
+    age: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    gender: Mapped[Gender | None] = mapped_column(Enum(Gender, name="gender"))
+    phone: Mapped[str] = mapped_column(String(11), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
     )
-    age: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, comment="환자 나이"
-    )
-    gender: Mapped[Gender | None] = mapped_column(
-        Enum(Gender, name="gender"), nullable=True, comment="환자 성별"
-    )
-    phone: Mapped[str] = mapped_column(
-        String(11), nullable=False, comment="국내 전화번호"
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, onupdate=func.now()
     )
 
     medical_records: Mapped[list["MedicalRecord"]] = relationship(
-        back_populates="patient",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
+        back_populates="patient", cascade="all, delete-orphan"
     )

@@ -1,18 +1,12 @@
-from typing import TYPE_CHECKING
+from datetime import datetime
 
-from decimal import Decimal
-
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Numeric, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db.databases import Base
-from app.core.db.models import TimestampMixin
-
-if TYPE_CHECKING:
-    from app.models.medical_record import MedicalRecord
 
 
-class AIAnalysisResult(TimestampMixin, Base):
+class AiAnalysisResult(Base):
     __tablename__ = "ai_analysis_results"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -20,19 +14,16 @@ class AIAnalysisResult(TimestampMixin, Base):
         BigInteger,
         ForeignKey("medical_records.id", ondelete="CASCADE"),
         nullable=False,
-        comment="진료 기록 ID",
     )
-    is_pneumonia: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, comment="폐렴 진단 여부"
+    is_pneumonia: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    confidence: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    heatmap_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    ai_model: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
     )
-    confidence: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2), nullable=False, comment="AI 예측 신뢰도"
-    )
-    heatmap_url: Mapped[str] = mapped_column(
-        String(255), nullable=False, comment="병변 표시 이미지 URL"
-    )
-    ai_model: Mapped[str] = mapped_column(
-        String(50), nullable=False, comment="예측에 사용된 AI 모델"
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, onupdate=func.now()
     )
 
     medical_record: Mapped["MedicalRecord"] = relationship(

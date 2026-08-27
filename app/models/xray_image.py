@@ -1,15 +1,9 @@
-from typing import TYPE_CHECKING
-
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db.databases import Base
-
-if TYPE_CHECKING:
-    from app.models.medical_record import MedicalRecord
-    from app.models.user import User
 
 
 class XrayImage(Base):
@@ -20,25 +14,15 @@ class XrayImage(Base):
         BigInteger,
         ForeignKey("medical_records.id", ondelete="CASCADE"),
         nullable=False,
-        comment="진료 기록 ID",
     )
+    # ON DELETE SET NULL이 동작하려면 이 컬럼은 NULL을 허용해야 합니다.
     uploader_id: Mapped[int | None] = mapped_column(
-        Integer,
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        comment="X-ray 이미지를 업로드한 유저 ID",
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    image_url: Mapped[str] = mapped_column(
-        String(2048), nullable=False, comment="이미지 URL"
-    )
-    shooting_datetime: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, comment="X-ray 촬영 일시"
-    )
+    image_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    shooting_datetime: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("current_timestamp(0)"),
-        comment="X-ray 이미지 등록 일시",
+        DateTime, nullable=False, server_default=func.now()
     )
 
     medical_record: Mapped["MedicalRecord"] = relationship(
