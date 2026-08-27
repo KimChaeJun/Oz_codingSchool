@@ -1,4 +1,5 @@
 import os
+from app.apis.user_apis import router as user_router
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,6 +9,7 @@ from app.apis.practice_apis import router
 
 app = FastAPI()
 app.include_router(router)
+app.include_router(user_router)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 

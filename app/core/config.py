@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     DB_PORT: str = "3306"
     DB_NAME: str = "ai_health"
 
+    JWT_SECRET_KEY: str = "dev-secret-key-for-local-development-2026"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     model_config = {
         "env_file": ".env",
         "extra": "ignore"
