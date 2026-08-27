@@ -1,7 +1,9 @@
 from enum import Enum
+
 from sqlalchemy import String, Boolean, DateTime, Enum as SQLEnum, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime, UTC
+
 from app.core.db.databases import Base
 from app.core.db.models import TimestampMixin
 

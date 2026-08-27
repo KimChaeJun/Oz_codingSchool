@@ -1,28 +1,27 @@
-from sqlalchemy import String, SmallInteger, Enum as SQLEnum, BigInteger
+from datetime import datetime
+
+from sqlalchemy import BigInteger, DateTime, Enum, SmallInteger, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from datetime import datetime, UTC
-from enum import Enum
+
 from app.core.db.databases import Base
-from app.core.db.models import TimestampMixin
+from app.models.user import Gender
 
 
-class GenderEnum(str, Enum):
-    M = "M"
-    F = "F"
-
-
-class Patient(Base, TimestampMixin):
+class Patient(Base):
     __tablename__ = "patients"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(30), nullable=False)
     age: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    gender: Mapped[GenderEnum | None] = mapped_column(SQLEnum(GenderEnum), nullable=True)
+    gender: Mapped[Gender | None] = mapped_column(Enum(Gender, name="gender"))
     phone: Mapped[str] = mapped_column(String(11), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, onupdate=func.now()
+    )
 
     medical_records: Mapped[list["MedicalRecord"]] = relationship(
-        "MedicalRecord",
-        back_populates="patient",
-        cascade="all, delete-orphan",
-        foreign_keys="MedicalRecord.patient_id",
+        back_populates="patient", cascade="all, delete-orphan"
     )
