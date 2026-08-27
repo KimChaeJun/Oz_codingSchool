@@ -4,10 +4,15 @@ from pathlib import Path
 from fastapi import FastAPI
 from starlette.staticfiles import StaticFiles
 from starlette.responses import FileResponse
+
 from app.apis.practice_apis import router
+from app.apis.auth import router as auth_router
+from app.apis.user import router as user_router
 
 app = FastAPI()
 app.include_router(router)
+app.include_router(auth_router)
+app.include_router(user_router)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
