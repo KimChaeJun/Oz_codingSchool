@@ -1,7 +1,8 @@
+import logging
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import delete_xray_image, save_xray_image
@@ -9,10 +10,20 @@ from app.models import MedicalRecord, User, XrayImage
 from app.repositories.medical_record_repository import MedicalRecordRepository
 from app.repositories.patient_repository import PatientRepository
 
+logger = logging.getLogger(__name__)
+
 
 class MedicalRecordService:
     @staticmethod
+    def _cleanup_image(image_url: str) -> None:
+        try:
+            delete_xray_image(image_url)
+        except OSError:
+            logger.warning("X-Ray 파일 삭제 실패: %s", image_url, exc_info=True)
+
+    @classmethod
     async def register(
+        cls,
         db: AsyncSession,
         *,
         patient_id: int,
@@ -43,26 +54,31 @@ class MedicalRecordService:
                 symptoms=symptoms,
             )
             db.add(medical_record)
+            await db.flush()
+
+            db.add(
+                XrayImage(
+                    record_id=medical_record.id,
+                    uploader_id=current_user.id,
+                    image_url=image_url,
+                    shooting_datetime=datetime.now(UTC),
+                )
+            )
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
-            delete_xray_image(image_url)
+            cls._cleanup_image(image_url)
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="이미 등록된 진료 차트 넘버입니다.",
             ) from exc
-
-        await db.refresh(medical_record)
-
-        db.add(
-            XrayImage(
-                record_id=medical_record.id,
-                uploader_id=current_user.id,
-                image_url=image_url,
-                shooting_datetime=datetime.now(UTC),
-            )
-        )
-        await db.commit()
+        except DataError as exc:
+            await db.rollback()
+            cls._cleanup_image(image_url)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="입력한 내용이 너무 깁니다.",
+            ) from exc
 
         return await MedicalRecordRepository.get_by_id_with_images(
             db, medical_record.id

@@ -27,8 +27,12 @@ async def save_xray_image(file: UploadFile) -> str:
     filename = f"{uuid.uuid4().hex}{extension}"
     destination = directory / filename
 
-    content = await file.read()
-    destination.write_bytes(content)
+    try:
+        content = await file.read()
+        destination.write_bytes(content)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
 
     return f"/media/{XRAY_SUBDIR}/{filename}"
 

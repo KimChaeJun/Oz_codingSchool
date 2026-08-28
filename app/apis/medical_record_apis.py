@@ -1,11 +1,13 @@
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, UploadFile, status
+from pydantic import AfterValidator
 
 from app.apis.dependencies import CurrentStaff, DatabaseSession
 from app.schemas.medical_record import (
     MedicalRecordDetailResponse,
     MedicalRecordListItemResponse,
+    validate_symptoms_byte_length,
 )
 from app.services.medical_record_service import MedicalRecordService
 
@@ -23,7 +25,9 @@ async def register_medical_record(
     current_user: CurrentStaff,
     patient_id: Annotated[int, Form()],
     chart_number: Annotated[str, Form(min_length=1, max_length=50)],
-    symptoms: Annotated[str, Form(min_length=1)],
+    symptoms: Annotated[
+        str, Form(min_length=1), AfterValidator(validate_symptoms_byte_length)
+    ],
     xray_image: Annotated[UploadFile, File()],
 ):
     return await MedicalRecordService.register(

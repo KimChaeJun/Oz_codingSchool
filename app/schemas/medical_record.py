@@ -4,6 +4,16 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 SYMPTOMS_PREVIEW_LIMIT = 100
 
+# MySQL TEXT 컬럼의 실제 물리적 한계(문자셋과 무관하게 65,535바이트 고정).
+# 문자 수가 아니라 UTF-8 인코딩 바이트 기준으로 검증해야 한다(한글은 3바이트).
+SYMPTOMS_MAX_BYTES = 65535
+
+
+def validate_symptoms_byte_length(value: str) -> str:
+    if len(value.encode("utf-8")) > SYMPTOMS_MAX_BYTES:
+        raise ValueError("증상 내용이 너무 깁니다.")
+    return value
+
 
 class MedicalRecordListItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

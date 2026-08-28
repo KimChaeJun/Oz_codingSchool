@@ -31,7 +31,7 @@ class PatientResponse(BaseModel):
     id: int
     name: str
     age: int
-    gender: Gender
+    gender: Gender | None
     phone: str
     created_at: datetime
     updated_at: datetime | None
@@ -41,7 +41,7 @@ class PatientDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     name: str
-    gender: Gender
+    gender: Gender | None
     phone: str
     age: int
 
