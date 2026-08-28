@@ -17,7 +17,7 @@ SQLAlchemy ORM을 사용하여 ERD에 정의된 테이블을 Python 클래스 �
 Alembic을 사용하여 SQLAlchemy 모델의 구조를 데이터베이스 스키마에 반영했다.
 
 ```bash
-.venv313/bin/alembic upgrade head
+uv run alembic upgrade head
 ```
 
 마이그레이션이 정상적으로 실행되었고, `ai_health` 데이터베이스에 다음 테이블이 생성되었다.
