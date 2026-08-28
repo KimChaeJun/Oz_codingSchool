@@ -4,7 +4,7 @@ from sqlalchemy import BigInteger, DateTime, Enum, SmallInteger, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db.databases import Base
-from app.models.user import GenderEnum as Gender
+from app.models.user import Gender
 
 
 class Patient(Base):
