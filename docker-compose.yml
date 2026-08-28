@@ -6,12 +6,16 @@ services:
     entrypoint: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
     volumes:
-      - ./app:/app
-      - static_volume:/app/static
-      - media_volume:/app/media
+      - ./app:/workspace/app
+      - static_volume:/workspace/static
+      - media_volume:/workspace/media
+      - uploads_volume:/workspace/uploads
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/healthcheck || exit 1"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthcheck')"]
       interval: 5s
       timeout: 5s
       retries: 3
@@ -40,3 +44,4 @@ volumes:
   mysql_volume:
   static_volume:
   media_volume:
+  uploads_volume:

@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -9,16 +10,21 @@ from starlette.staticfiles import StaticFiles
 from app.apis.practice_apis import router
 from app.apis.user_apis import router as user_router
 from app.apis.patient import router as patient_router
-from app.apis.patient import router as patient_router
-from app.core.database import Base, engine
+from app.core.db.databases import Base, async_engine
 
-# 데이터베이스 테이블 생성
-Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    async with async_engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    yield
+    await async_engine.dispose()
 
 app = FastAPI(
     title="환자 관리 API",
     description="환자 정보 및 진료기록 관리 API",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS 설정
@@ -33,7 +39,6 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(router)
 app.include_router(user_router)
-app.include_router(patient_router)
 app.include_router(patient_router)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
