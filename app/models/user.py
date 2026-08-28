@@ -1,39 +1,61 @@
-from enum import Enum
+import enum
+from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import String, Boolean, DateTime, Enum as SQLEnum, BigInteger
-from sqlalchemy.orm import Mapped, mapped_column
-from datetime import datetime, UTC
+from sqlalchemy import Boolean, DateTime, Enum, Integer, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db.databases import Base
-from app.core.db.models import TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.xray_image import XrayImage
 
 
-class GenderEnum(str, Enum):
+class Gender(str, enum.Enum):
     M = "M"
     F = "F"
 
 
-class RoleEnum(str, Enum):
+class Role(str, enum.Enum):
     PENDING = "PENDING"
     STAFF = "STAFF"
     ADMIN = "ADMIN"
 
 
-class DepartmentEnum(str, Enum):
+class Department(str, enum.Enum):
     MEDICAL = "MEDICAL"
     DEV = "DEV"
     RESEARCH = "RESEARCH"
 
 
-class User(Base, TimestampMixin):
+class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(20), nullable=False)
-    phone_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
-    gender: Mapped[GenderEnum] = mapped_column(SQLEnum(GenderEnum), nullable=False)
-    department: Mapped[DepartmentEnum] = mapped_column(SQLEnum(DepartmentEnum), nullable=False)
-    role: Mapped[RoleEnum] = mapped_column(SQLEnum(RoleEnum), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    phone_number: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    gender: Mapped[Gender] = mapped_column(Enum(Gender, name="gender"), nullable=False)
+    department: Mapped[Department] = mapped_column(
+        Enum(Department, name="department"), nullable=False
+    )
+    role: Mapped[Role] = mapped_column(
+        Enum(Role, name="role"),
+        nullable=False,
+        default=Role.PENDING,
+        server_default=Role.PENDING.value,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, onupdate=func.now()
+    )
+
+    uploaded_xray_images: Mapped[list["XrayImage"]] = relationship(
+        back_populates="uploader", passive_deletes=True
+    )
