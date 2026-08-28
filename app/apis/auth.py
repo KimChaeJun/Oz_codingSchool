@@ -3,12 +3,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.db.databases import async_get_db
-from app.core.security import create_access_token, get_current_user, get_refresh_token, decode_token
+from app.core.security import create_access_token, get_current_user, get_refresh_token
 from app.schemas.user import LoginRequest, LoginResponse
 from app.services.user import login_user
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+COOKIE_SECURE = settings.ENVIRONMENT == "production"
 
 
 @router.post(
@@ -30,7 +33,7 @@ async def login(
         max_age=7 * 24 * 60 * 60,
         path="/",
         httponly=True,
-        secure=False,
+        secure=COOKIE_SECURE,
         samesite="lax",
     )
 
@@ -53,7 +56,7 @@ async def logout(
         key="refresh_token",
         path="/",
         httponly=True,
-        secure=False,
+        secure=COOKIE_SECURE,
         samesite="lax",
     )
 
@@ -65,9 +68,8 @@ async def logout(
     summary="Access Token 재발급",
 )
 async def refresh(
-    refresh_token: Annotated[str, Depends(get_refresh_token)],
+    payload: Annotated[dict, Depends(get_refresh_token)],
 ) -> LoginResponse:
-    payload = decode_token(refresh_token)
     user_id = payload["sub"]
 
     new_access_token = create_access_token(data={"sub": user_id})

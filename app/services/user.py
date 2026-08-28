@@ -1,6 +1,7 @@
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_access_token, create_refresh_token
@@ -14,7 +15,7 @@ from app.repositories.user import (
     delete_user,
     get_all_users,
 )
-from app.schemas.user import UserCreateRequest, LoginResponse, TokenResponse, UserUpdateRequest, PasswordChangeRequest
+from app.schemas.user import UserCreateRequest, TokenResponse, UserUpdateRequest, PasswordChangeRequest
 
 
 password_hasher = PasswordHasher()
@@ -55,7 +56,14 @@ async def register_user(
         role=RoleEnum.PENDING,
     )
 
-    return await create_user(db, user)
+    try:
+        return await create_user(db, user)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 등록된 이메일 또는 휴대폰 번호입니다.",
+        )
 
 
 async def login_user(
@@ -127,7 +135,14 @@ async def update_profile(
     if body.department:
         user.department = body.department
 
-    return await update_user(db, user)
+    try:
+        return await update_user(db, user)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 등록된 휴대폰 번호입니다.",
+        )
 
 
 async def change_password(

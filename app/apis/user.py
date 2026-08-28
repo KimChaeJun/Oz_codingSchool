@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.db.databases import async_get_db
 from app.core.security import get_current_user
 from app.models.user import User
@@ -17,6 +18,8 @@ from app.services.user import (
 
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
+
+COOKIE_SECURE = settings.ENVIRONMENT == "production"
 
 
 @router.post(
@@ -107,7 +110,7 @@ async def delete_my_account(
         key="refresh_token",
         path="/",
         httponly=True,
-        secure=False,
+        secure=COOKIE_SECURE,
         samesite="lax",
     )
 

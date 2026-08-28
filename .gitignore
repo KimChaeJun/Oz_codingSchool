@@ -12,6 +12,9 @@ wheels/
 # VSCode
 settings.json
 
+# OS
+.DS_Store
+
 # Virtual environments
 .venv
 
