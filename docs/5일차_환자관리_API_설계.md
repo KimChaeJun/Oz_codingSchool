@@ -1,16 +1,16 @@
 # 5일차 환자관리 API 설계
 
-## 📋 개요
+##  개요
 의료 기관의 환자 정보와 진료 데이터를 통합 관리하는 백엔드 시스템입니다.
 
-## 🎯 주요 기능
+##  주요 기능
 - 환자 정보 관리 (등록, 조회, 수정, 삭제)
 - 진료기록 추적 (진료 내용, 증상 기록)
 - X-Ray 이미지 저장 및 관리
 - 페이징과 필터링을 통한 효율적인 데이터 검색
 - Cascade Delete로 데이터 무결성 보장
 
-## 📊 API 명세
+##  API 명세
 
 ### 환자 관리 API (5개)
 
@@ -185,7 +185,7 @@ DELETE /api/v1/medical-records/{record_id}
 Response: 204 No Content
 ```
 
-## 📊 데이터 모델
+##  데이터 모델
 
 ### Patient (환자)
 ```
@@ -216,7 +216,7 @@ Response: 204 No Content
 - created_at (TIMESTAMP)
 ```
 
-## ✅ 요구사항
+##  요구사항
 
 - 페이징: page, size 파라미터 지원
 - 필터링: 이름, 성별, 나이로 필터링
@@ -225,7 +225,7 @@ Response: 204 No Content
 - Cascade Delete: 환자 삭제 시 진료기록 자동 삭제
 - 오류 처리: 401, 403, 404, 409, 413, 415, 422 상태코드
 
-## 🔧 기술 스택
+##  기술 스택
 - FastAPI
 - SQLAlchemy ORM
 - MySQL
