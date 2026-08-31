@@ -15,6 +15,13 @@ wheels/
 # VSCode
 settings.json
 
+# OS
+.DS_Store
+
+# Uploaded media files
+media/*
+!media/.gitkeep
+
 # Virtual environments
 .venv
 
