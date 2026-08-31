@@ -52,5 +52,17 @@ async def get_current_admin(
     return current_user
 
 
+async def get_current_staff(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    if current_user.role not in (Role.STAFF, Role.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="의료인 또는 관리자 권한이 필요합니다.",
+        )
+    return current_user
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
 CurrentAdmin = Annotated[User, Depends(get_current_admin)]
+CurrentStaff = Annotated[User, Depends(get_current_staff)]
