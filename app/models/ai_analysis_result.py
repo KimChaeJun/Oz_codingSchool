@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db.databases import Base
@@ -8,6 +17,13 @@ from app.core.db.databases import Base
 
 class AiAnalysisResult(Base):
     __tablename__ = "ai_analysis_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "record_id",
+            "ai_model",
+            name="uq_ai_analysis_results_record_model",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
