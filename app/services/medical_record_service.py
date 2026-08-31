@@ -79,6 +79,10 @@ class MedicalRecordService:
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="입력한 내용이 너무 깁니다.",
             ) from exc
+        except Exception:
+            await db.rollback()
+            cls._cleanup_image(image_url)
+            raise
 
         return await MedicalRecordRepository.get_by_id_with_images(
             db, medical_record.id

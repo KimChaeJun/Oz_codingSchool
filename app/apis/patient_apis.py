@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
-from app.apis.dependencies import CurrentStaff, DatabaseSession
+from app.apis.dependencies import CurrentMedicalStaff, CurrentStaff, DatabaseSession
 from app.schemas.patient import (
     PatientCreateRequest,
     PatientDetailResponse,
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/v1/patients", tags=["patients"])
 async def register_patient(
     body: PatientCreateRequest,
     db: DatabaseSession,
-    _staff: CurrentStaff,
+    _staff: CurrentMedicalStaff,
 ):
     return await PatientService.register(db, body)
 

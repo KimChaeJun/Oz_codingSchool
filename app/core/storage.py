@@ -2,6 +2,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 MEDIA_ROOT = BASE_DIR / "media"
@@ -12,6 +13,19 @@ ALLOWED_CONTENT_TYPES = {
     "image/png": ".png",
 }
 
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+CHUNK_SIZE = 1024 * 1024  # 1MB
+
+FILE_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+}
+
+
+def _has_valid_signature(content_type: str, header: bytes) -> bool:
+    signatures = FILE_SIGNATURES.get(content_type, ())
+    return any(header.startswith(signature) for signature in signatures)
+
 
 async def save_xray_image(file: UploadFile) -> str:
     extension = ALLOWED_CONTENT_TYPES.get(file.content_type or "")
@@ -21,6 +35,32 @@ async def save_xray_image(file: UploadFile) -> str:
             detail="X-Ray 이미지는 JPEG 또는 PNG 형식만 업로드할 수 있습니다.",
         )
 
+    chunks: list[bytes] = []
+    header = b""
+    total_size = 0
+    while chunk := await file.read(CHUNK_SIZE):
+        total_size += len(chunk)
+        if total_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="X-Ray 이미지는 10MB를 초과할 수 없습니다.",
+            )
+        if not header:
+            header = chunk[:16]
+        chunks.append(chunk)
+
+    if total_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="빈 파일은 업로드할 수 없습니다.",
+        )
+
+    if not _has_valid_signature(file.content_type, header):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="파일 내용이 선언된 이미지 형식과 일치하지 않습니다.",
+        )
+
     directory = MEDIA_ROOT / XRAY_SUBDIR
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -28,8 +68,7 @@ async def save_xray_image(file: UploadFile) -> str:
     destination = directory / filename
 
     try:
-        content = await file.read()
-        destination.write_bytes(content)
+        await run_in_threadpool(destination.write_bytes, b"".join(chunks))
     except Exception:
         destination.unlink(missing_ok=True)
         raise
