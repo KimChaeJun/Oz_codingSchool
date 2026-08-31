@@ -424,9 +424,15 @@ class FakeUploadFile:
     def __init__(self, content: bytes, content_type: str):
         self.content_type = content_type
         self._content = content
+        self._offset = 0
 
-    async def read(self) -> bytes:
-        return self._content
+    async def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            chunk = self._content[self._offset :]
+        else:
+            chunk = self._content[self._offset : self._offset + size]
+        self._offset += len(chunk)
+        return chunk
 
 
 @pytest.mark.asyncio
