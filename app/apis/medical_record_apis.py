@@ -27,7 +27,7 @@ from app.schemas.medical_record import (
     MedicalRecordResponse,
     MedicalRecordUpdate,
 )
-from app.services.auth_service import get_current_user
+from app.apis.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/api/v1/patients/{patient_id}/medical-records",
