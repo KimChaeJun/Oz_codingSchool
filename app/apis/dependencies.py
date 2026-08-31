@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db.databases import async_get_db
 from app.core.security import TokenValidationError, decode_token
-from app.models import Role, User
+from app.models import Department, Role, User
 from app.repositories.user_repository import UserRepository
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -63,6 +63,18 @@ async def get_current_staff(
     return current_user
 
 
+async def get_current_medical_staff(
+    current_user: Annotated[User, Depends(get_current_staff)],
+) -> User:
+    if current_user.role != Role.ADMIN and current_user.department != Department.MEDICAL:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="의료 부서 소속 의료인 또는 관리자 권한이 필요합니다.",
+        )
+    return current_user
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
 CurrentAdmin = Annotated[User, Depends(get_current_admin)]
 CurrentStaff = Annotated[User, Depends(get_current_staff)]
+CurrentMedicalStaff = Annotated[User, Depends(get_current_medical_staff)]

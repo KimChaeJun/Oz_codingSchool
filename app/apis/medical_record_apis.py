@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, UploadFile, status
 from pydantic import AfterValidator
 
-from app.apis.dependencies import CurrentStaff, DatabaseSession
+from app.apis.dependencies import CurrentMedicalStaff, CurrentStaff, DatabaseSession
 from app.schemas.medical_record import (
     MedicalRecordDetailResponse,
     MedicalRecordListItemResponse,
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/v1", tags=["medical-records"])
 )
 async def register_medical_record(
     db: DatabaseSession,
-    current_user: CurrentStaff,
+    current_user: CurrentMedicalStaff,
     patient_id: Annotated[int, Form()],
     chart_number: Annotated[str, Form(min_length=1, max_length=50)],
     symptoms: Annotated[
