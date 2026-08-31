@@ -8,18 +8,21 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Response,
     UploadFile,
     status,
 )
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.apis.dependencies import get_current_user
 from app.core.db.databases import async_get_db
 from app.models.medical_record import MedicalRecord
 from app.models.patient import Patient
-from app.models.user import User
+from app.models.user import Department, User
 from app.models.xray_image import XrayImage
 from app.schemas.medical_record import (
     MedicalRecordListItem,
@@ -27,7 +30,7 @@ from app.schemas.medical_record import (
     MedicalRecordResponse,
     MedicalRecordUpdate,
 )
-from app.apis.dependencies import get_current_user
+
 
 router = APIRouter(
     prefix="/api/v1/patients/{patient_id}/medical-records",
@@ -35,10 +38,89 @@ router = APIRouter(
 )
 
 
+MAX_XRAY_SIZE = 10 * 1024 * 1024
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png"}
+
+
 def get_media_directory() -> Path:
     directory = Path(__file__).resolve().parents[2] / "media" / "xray"
     directory.mkdir(parents=True, exist_ok=True)
     return directory
+
+
+def get_media_path(image_url: str) -> Path | None:
+    prefix = "/media/xray/"
+
+    if not image_url.startswith(prefix):
+        return None
+
+    filename = Path(image_url.removeprefix(prefix)).name
+    image_path = get_media_directory() / filename
+
+    if image_path.parent != get_media_directory():
+        return None
+
+    return image_path
+
+
+def require_medical_staff(current_user: User) -> None:
+    if current_user.department != Department.MEDICAL:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="의료진 권한이 필요합니다.",
+        )
+
+
+async def get_patient(
+    patient_id: int,
+    db: AsyncSession,
+) -> Patient:
+    patient = await db.get(Patient, patient_id)
+
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="환자를 찾을 수 없습니다.",
+        )
+
+    return patient
+
+
+async def validate_xray_image(
+    xray_image: UploadFile,
+) -> tuple[bytes, str]:
+    content_type = xray_image.content_type or ""
+
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="JPG 또는 PNG 이미지만 업로드할 수 있습니다.",
+        )
+
+    image_data = await xray_image.read(MAX_XRAY_SIZE + 1)
+
+    if len(image_data) > MAX_XRAY_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="이미지 파일은 10MB 이하만 업로드할 수 있습니다.",
+        )
+
+    if content_type == "image/jpeg":
+        is_valid_image = image_data.startswith(b"\xff\xd8\xff")
+        suffix = ".jpg"
+    else:
+        is_valid_image = image_data.startswith(
+            b"\x89PNG\r\n\x1a\n"
+        )
+        suffix = ".png"
+
+    if not is_valid_image:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="파일 내용이 이미지 형식과 일치하지 않습니다.",
+        )
+
+    return image_data, suffix
 
 
 async def get_record(
@@ -80,23 +162,10 @@ async def create_medical_record(
     db: AsyncSession = Depends(async_get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_medical_staff(current_user)
+    await get_patient(patient_id, db)
 
-    patient = await db.get(Patient, patient_id)
-
-    if patient is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="환자를 찾을 수 없습니다.",
-        )
-
-    if (
-        not xray_image.content_type
-        or not xray_image.content_type.startswith("image/")
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="이미지 파일만 업로드할 수 있습니다.",
-        )
+    image_data, suffix = await validate_xray_image(xray_image)
 
     record = MedicalRecord(
         patient_id=patient_id,
@@ -107,11 +176,18 @@ async def create_medical_record(
     db.add(record)
     await db.flush()
 
-    suffix = Path(xray_image.filename or "").suffix.lower()
     filename = f"{uuid4().hex}{suffix}"
     file_path = get_media_directory() / filename
 
-    file_path.write_bytes(await xray_image.read())
+    try:
+        file_path.write_bytes(image_data)
+    except OSError as exc:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="이미지 파일 저장에 실패했습니다.",
+        ) from exc
 
     image = XrayImage(
         record_id=record.id,
@@ -121,15 +197,27 @@ async def create_medical_record(
     )
 
     db.add(image)
-    await db.commit()
 
-    result = await db.execute(
-        select(MedicalRecord)
-        .options(selectinload(MedicalRecord.xray_images))
-        .where(MedicalRecord.id == record.id)
-    )
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        file_path.unlink(missing_ok=True)
 
-    return result.scalar_one()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 사용 중인 차트 번호입니다.",
+        ) from exc
+    except Exception as exc:
+        await db.rollback()
+        file_path.unlink(missing_ok=True)
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="진료기록 저장에 실패했습니다.",
+        ) from exc
+
+    return await get_record(patient_id, record.id, db)
 
 
 @router.get(
@@ -139,27 +227,27 @@ async def create_medical_record(
 )
 async def get_medical_records(
     patient_id: int,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(async_get_db),
     current_user: User = Depends(get_current_user),
 ):
-    patient = await db.get(Patient, patient_id)
+    await get_patient(patient_id, db)
 
-    if patient is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="환자를 찾을 수 없습니다.",
-        )
+    base_condition = MedicalRecord.patient_id == patient_id
 
-    count_stmt = select(func.count()).select_from(MedicalRecord).where(
-        MedicalRecord.patient_id == patient_id
-    )
+    count_stmt = select(func.count()).select_from(
+        MedicalRecord
+    ).where(base_condition)
 
     total = await db.scalar(count_stmt)
 
     result = await db.execute(
         select(MedicalRecord)
-        .where(MedicalRecord.patient_id == patient_id)
+        .where(base_condition)
         .order_by(MedicalRecord.id.desc())
+        .offset((page - 1) * size)
+        .limit(size)
     )
 
     records = result.scalars().all()
@@ -234,7 +322,16 @@ async def delete_medical_record(
 ):
     record = await get_record(patient_id, record_id, db)
 
+    image_paths = [
+        image_path
+        for image in record.xray_images
+        if (image_path := get_media_path(image.image_url)) is not None
+    ]
+
     await db.delete(record)
     await db.commit()
+
+    for image_path in image_paths:
+        image_path.unlink(missing_ok=True)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
