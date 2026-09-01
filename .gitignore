@@ -1,5 +1,8 @@
 # Python-generated files
 __pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
 *.py[oc]
 build/
 dist/
@@ -11,6 +14,13 @@ wheels/
 .idea
 # VSCode
 settings.json
+
+# OS
+.DS_Store
+
+# Uploaded media files
+media/*
+!media/.gitkeep
 
 # Virtual environments
 .venv
