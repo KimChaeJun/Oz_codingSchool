@@ -16,7 +16,8 @@ Day별 문서에 흩어놓지 않고, "지금 당장 하지 않기로 한 것"�
 
 #### Alembic 멀티헤드 정리
 - 2026-09-02 Docker 테스트 2(회원가입/로그인)에서 실제로 이 문제 때문에 막힘: 새 `mysql_volume`에 스키마가 없어 `alembic upgrade head`를 돌리려 했으나 head가 2개(`20260827_02`, `2a635f4b60e5`)라 명령 자체가 실패함. `alembic upgrade 20260827_02`로 리비전을 직접 지정해 우회 실행 후 테스트 통과.
-- `2a635f4b60e5_add_initial_schema.py`는 본인이 3일차에 작성한 초기 스키마이며, 팀에서 채택된 `20260826_01`(chaeyun) → `20260827_02`(팀장님) 계보와 동일한 5개 테이블을 중복 생성함. 어느 브랜치도 이 파일을 부모로 삼는 후속 migration이 없음. 현재 Docker 테스트 DB에는 해당 migration이 적용되지 않았음을 확인함. 다른 팀원의 로컬 DB 적용 여부는 확인하지 않음.
+- `2a635f4b60e5_add_initial_schema.py`는 본인이 3일차에 작성한 초기 스키마이며, 팀에서 채택된 `20260826_01`(chaeyun) → `20260827_02`(팀장님) 계보와 동일한 5개 테이블을 중복 생성함. 어느 브랜치도 이 파일을 부모로 삼는 후속 migration이 없음. 현재 Docker 테스트 DB에는 해당 migration이 적용되지 않았음을 확인함.
+- 2026-09-03 채연님 로컬에서 `uv run alembic heads` 확인 결과 `20260827_02 (head)` 한 줄만 출력됨 → 채연님 로컬은 영향 없음 확인 완료.
 - 해결: 별도 PR [#27](https://github.com/KimChaeJun/Oz_codingSchool/pull/27)(`fix/remove-duplicate-migration` → `main`)로 이미 분리 처리함. 2026-09-02 생성, 팀장님(day10까지 부재) 리뷰 대기 중, 아직 merge 안 됨. day8 브랜치 자체는 이 파일을 그대로 갖고 있음(별도 PR이라 안 건드림). PR merge 확인되면 위 표 상태를 완료로 변경.
 - **day10 시작 전 필수 조치**: day9/day10을 지금의 day8(또는 day9) 브랜치에서 그냥 이어서 새로 파기만 하면, 이 파일이 그대로 따라와서 day10에서 `alembic upgrade head`가 다시 실패함(단순 브랜치 생성은 merge가 아니라 파일이 안 지워짐, `git merge-tree`로 시뮬레이션해 확인). 반드시 day10 시작 전에 (a) PR #27이 merge된 최신 `main`을 작업 브랜치에 merge하거나, (b) 작업 브랜치에서 이 파일을 직접 삭제한 뒤 진행할 것.
 
