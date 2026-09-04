@@ -11,19 +11,25 @@ name = "ai-health-web-assignment"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "redis" },
+]
+
+[package.optional-dependencies]
+ai = [
+    { name = "pillow" },
+    { name = "torch" },
+    { name = "torchvision" },
+]
+app = [
     { name = "alembic" },
     { name = "asyncmy" },
     { name = "cryptography" },
     { name = "email-validator" },
     { name = "fastapi", extra = ["standard"] },
-    { name = "pillow" },
     { name = "pwdlib", extra = ["argon2"] },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
-    { name = "redis" },
     { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "torch" },
-    { name = "torchvision" },
     { name = "uuid6" },
 ]
 
@@ -37,21 +43,22 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.18.4" },
-    { name = "asyncmy", specifier = ">=0.2.11" },
-    { name = "cryptography", specifier = ">=46.0.6" },
-    { name = "email-validator", specifier = ">=2.3.0" },
-    { name = "fastapi", extras = ["standard"], specifier = ">=0.135.3" },
-    { name = "pillow", specifier = ">=12.3.0" },
-    { name = "pwdlib", extras = ["argon2"], specifier = ">=0.3.1" },
-    { name = "pydantic-settings", specifier = ">=2.13.1" },
-    { name = "pyjwt", specifier = ">=2.13.0" },
+    { name = "alembic", marker = "extra == 'app'", specifier = ">=1.18.4" },
+    { name = "asyncmy", marker = "extra == 'app'", specifier = ">=0.2.11" },
+    { name = "cryptography", marker = "extra == 'app'", specifier = ">=46.0.6" },
+    { name = "email-validator", marker = "extra == 'app'", specifier = ">=2.3.0" },
+    { name = "fastapi", extras = ["standard"], marker = "extra == 'app'", specifier = ">=0.135.3" },
+    { name = "pillow", marker = "extra == 'ai'", specifier = ">=12.3.0" },
+    { name = "pwdlib", extras = ["argon2"], marker = "extra == 'app'", specifier = ">=0.3.1" },
+    { name = "pydantic-settings", marker = "extra == 'app'", specifier = ">=2.13.1" },
+    { name = "pyjwt", marker = "extra == 'app'", specifier = ">=2.13.0" },
     { name = "redis", specifier = ">=5.2.0" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.49" },
-    { name = "torch", specifier = ">=2.13.0" },
-    { name = "torchvision", specifier = ">=0.28.0" },
-    { name = "uuid6", specifier = ">=2025.0.1" },
+    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'app'", specifier = ">=2.0.49" },
+    { name = "torch", marker = "extra == 'ai'", specifier = ">=2.13.0" },
+    { name = "torchvision", marker = "extra == 'ai'", specifier = ">=0.28.0" },
+    { name = "uuid6", marker = "extra == 'app'", specifier = ">=2025.0.1" },
 ]
+provides-extras = ["app", "ai"]
 
 [package.metadata.requires-dev]
 dev = [

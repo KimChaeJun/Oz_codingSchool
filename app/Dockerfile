@@ -20,8 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 의존성 정의 파일만 먼저 복사 (레이어 캐시: 앱 코드만 바뀌면 이 설치 단계는 재사용됨)
+# --extra app: torch/torchvision(ai extra, AI Worker 전용)은 제외해 이미지 용량을 줄임
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev --extra app
 
 # 프로젝트 전체 복사 (app 패키지, static/, media/, alembic 등 포함)
 COPY . .
