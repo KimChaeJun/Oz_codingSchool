@@ -9,6 +9,8 @@ services:
       # 컨테이너 안에서는 mysql 서비스가 별도 컨테이너이므로,
       # 컴포즈 네트워크상의 서비스명(mysql)으로 덮어써야 실제로 연결됨.
       DB_HOST: mysql
+      # 위와 같은 이유로, Redis도 컴포즈 네트워크상의 서비스명(redis)으로 접속해야 함.
+      REDIS_HOST: redis
     ports:
       - "8000:8000"
     volumes:
@@ -22,6 +24,7 @@ services:
       retries: 3
     depends_on:
       - mysql
+      - redis
 
   mysql:
     image: mysql:8.0
@@ -43,6 +46,19 @@ services:
       timeout: 20s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_volume:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
 
 volumes:
   mysql_volume:
+  redis_volume:
