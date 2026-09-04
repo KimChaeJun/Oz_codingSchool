@@ -76,7 +76,14 @@ def main() -> None:
     logger.info("AI worker 시작. 큐: %s", PREDICTION_TASK_QUEUE)
 
     while True:
-        item = redis.brpop(PREDICTION_TASK_QUEUE, timeout=POLL_TIMEOUT_SECONDS)
+        try:
+            item = redis.brpop(PREDICTION_TASK_QUEUE, timeout=POLL_TIMEOUT_SECONDS)
+        except Exception:
+            # Redis 연결 문제 등으로 BRPOP 자체가 실패해도 워커 프로세스는
+            # 죽지 않고 재시도한다 (예: 컨테이너 시작 순서상 일시적 연결 실패).
+            logger.exception("BRPOP 실패, 재시도합니다")
+            continue
+
         if item is None:
             continue
 

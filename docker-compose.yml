@@ -58,6 +58,20 @@ services:
       timeout: 5s
       retries: 3
 
+  ai-worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+    volumes:
+      # fastapi가 저장한 media/ 디렉터리를 그대로 봐야 업로드된 이미지를 읽을 수 있음
+      - .:/app
+    depends_on:
+      - redis
+
 
 volumes:
   mysql_volume:
