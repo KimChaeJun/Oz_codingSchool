@@ -1,7 +1,9 @@
 import asyncio
+import json
 import logging
 import threading
 import time
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -12,6 +14,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
+from redis.asyncio import Redis as AsyncRedis
 from sqlalchemy import BigInteger, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -23,7 +26,9 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import StaticPool
 
+import app.core.redis_client as app_redis_client_module
 import app.core.storage as storage_module
+import app.services.prediction_service as prediction_service_module
 import worker.main as worker_main_module
 import worker.model as worker_model_module
 import worker.redis_client as worker_redis_client_module
@@ -42,7 +47,7 @@ from app.models import (
 )
 from app.repositories.ai_analysis_result_repository import AiAnalysisResultRepository
 from app.services.prediction_service import PredictionService
-from shared.constants import PREDICTION_TASK_QUEUE
+from shared.constants import PREDICTION_TASK_QUEUE, prediction_result_channel
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 
@@ -1070,3 +1075,197 @@ async def test_post_response_and_get_response_are_consistent(
         assert get_body[field] == post_body[field], (
             f"필드 '{field}' 불일치: POST={post_body[field]!r} GET={get_body[field]!r}"
         )
+
+
+# =====================================================================
+# 14) Redis 장애 / 타임아웃 / 다중 워커 — 실제 Docker E2E에서 발견한
+# socket_timeout 버그(worker.redis_client) 이후 추가한 회귀 방지 테스트.
+# 위 테스트들은 worker.main.handle_task는 재사용하지만 worker.main.main()의
+# 실제 BRPOP 루프(timeout=5초)는 재사용하지 않아, 그 경계 조건은 자동
+# 테스트로 검증되지 않고 있었다.
+# =====================================================================
+
+
+def test_worker_brpop_survives_full_timeout_without_raising() -> None:
+    """실제 버그 재현: redis-py 기본 socket_timeout(5초)이 worker.main의
+    BRPOP timeout(5초)과 같으면, 서버가 nil로 정상 응답하기 전에 클라이언트
+    소켓이 먼저 TimeoutError를 던져 워커 프로세스가 죽는다
+    (worker/redis_client.py의 socket_timeout=None으로 수정함). 큐가 비어
+    BRPOP이 timeout 끝까지 기다리는 상황을 그대로 재현해 예외 없이
+    None을 반환하는지 확인한다."""
+    redis = worker_redis_client_module.get_redis()
+    empty_queue = f"test:empty-queue:{uuid.uuid4().hex}"
+
+    result = redis.brpop(empty_queue, timeout=worker_main_module.POLL_TIMEOUT_SECONDS)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_predict_raises_504_when_worker_never_responds(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """워커가 응답하지 않는 상황(다운/큐 미소비)을 흉내내기 위해, 이번
+    요청만 실제 워커가 듣지 않는 다른 큐로 enqueue되도록 큐 이름을
+    바꾸고, 대기 시간도 짧게 줄여 빠르게 504를 확인한다."""
+    await create_user(session_factory, email="staff@example.com", role=Role.STAFF)
+    headers = auth_headers(await login(client, "staff@example.com"))
+    record_id = await _create_patient_and_record_with_xray(
+        client, headers, chart_number="TIMEOUT-CN-0001"
+    )
+
+    monkeypatch.setattr(
+        prediction_service_module, "PREDICTION_TASK_QUEUE", "test:unconsumed-queue"
+    )
+    monkeypatch.setattr(prediction_service_module.settings, "PREDICTION_TIMEOUT_SECONDS", 1)
+
+    response = await client.post(
+        f"/api/v1/medical-records/{record_id}/predictions", headers=headers
+    )
+
+    assert response.status_code == 504, response.text
+    assert "시간이 초과" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_predict_raises_503_when_redis_unreachable(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FastAPI가 Redis에 아예 연결하지 못하는 상황(예: 컨테이너 시작
+    순서상 Redis가 아직 준비되지 않음)을 흉내내, get_redis()가 존재하지
+    않는 포트를 가리키는 클라이언트를 반환하도록 바꾼다."""
+    await create_user(session_factory, email="staff@example.com", role=Role.STAFF)
+    headers = auth_headers(await login(client, "staff@example.com"))
+    record_id = await _create_patient_and_record_with_xray(
+        client, headers, chart_number="UNREACHABLE-CN-0001"
+    )
+
+    def get_unreachable_redis() -> AsyncRedis:
+        return AsyncRedis.from_url(
+            "redis://127.0.0.1:1/0",
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
+
+    monkeypatch.setattr(prediction_service_module, "get_redis", get_unreachable_redis)
+
+    response = await client.post(
+        f"/api/v1/medical-records/{record_id}/predictions", headers=headers
+    )
+
+    assert response.status_code == 503, response.text
+    assert "Redis 연결" in response.json()["detail"]
+
+
+def test_worker_multiple_consumers_process_each_task_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """필수 요구사항 검증: '다중 워커 환경에서 Task Queue에서 작업을
+    꺼내와서 폐렴 예측을 진행'. BRPOP이 원자적이라는 설명만으로는
+    부족하므로, 워커 2개(모듈 스코프 redis_worker fixture + 이 테스트가
+    띄우는 워커 1개)를 동시에 큐에 붙여 각 작업이 정확히 한 번만
+    소비되고 올바른 채널로 결과가 오는지 실제로 검증한다."""
+    fixed_prediction = worker_model_module.PneumoniaPrediction(
+        is_pneumonia=False, pneumonia_probability=0.02
+    )
+    monkeypatch.setattr(worker_model_module, "predict", lambda *_args: fixed_prediction)
+
+    redis = worker_redis_client_module.get_redis()
+    task_ids = [uuid.uuid4().hex for _ in range(10)]
+    channels = [prediction_result_channel(task_id) for task_id in task_ids]
+
+    pubsub = redis.pubsub()
+    pubsub.subscribe(*channels)
+
+    stop_event = threading.Event()
+
+    def run_extra_worker() -> None:
+        worker_redis = worker_redis_client_module.get_redis()
+        while not stop_event.is_set():
+            item = worker_redis.brpop(PREDICTION_TASK_QUEUE, timeout=0.5)
+            if item is None:
+                continue
+            _, raw_task = item
+            try:
+                worker_main_module.handle_task(worker_redis, raw_task)
+            except Exception:
+                logging.getLogger(__name__).exception("추가 테스트 워커 작업 처리 실패")
+
+    extra_worker = threading.Thread(target=run_extra_worker, daemon=True)
+    extra_worker.start()
+
+    try:
+        for task_id in task_ids:
+            payload = {
+                "task_id": task_id,
+                "record_id": 0,
+                "image_path": "/media/xray/does-not-need-to-exist.jpg",
+                "ai_model": worker_model_module.MODEL_VERSION,
+            }
+            redis.lpush(PREDICTION_TASK_QUEUE, json.dumps(payload))
+
+        received: dict[str, int] = {task_id: 0 for task_id in task_ids}
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not all(received.values()):
+            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if message is None:
+                continue
+            data = json.loads(message["data"])
+            received[data["task_id"]] += 1
+    finally:
+        stop_event.set()
+        extra_worker.join(timeout=5)
+        pubsub.unsubscribe(*channels)
+        pubsub.close()
+
+    assert all(count == 1 for count in received.values()), (
+        f"일부 작업이 중복 또는 누락 처리됨(정확히 1이어야 함): {received}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_predict_raises_502_when_result_payload_missing_fields(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Worker가 필수 필드(is_pneumonia/pneumonia_probability/ai_model)가
+    빠진 결과를 publish하는 상황(버전 불일치, 버그 등)을 흉내낸다.
+    task_id를 고정해두고 실제 큐는 아무도 못 보게 바꾼 뒤, 정확히 그
+    채널로 필드 누락 payload를 직접 publish한다."""
+    await create_user(session_factory, email="staff@example.com", role=Role.STAFF)
+    headers = auth_headers(await login(client, "staff@example.com"))
+    record_id = await _create_patient_and_record_with_xray(
+        client, headers, chart_number="MALFORMED-CN-0001"
+    )
+
+    fixed_uuid = uuid.UUID(int=0xABCDEF)
+    monkeypatch.setattr(prediction_service_module.uuid, "uuid4", lambda: fixed_uuid)
+    monkeypatch.setattr(
+        prediction_service_module, "PREDICTION_TASK_QUEUE", "test:unconsumed-queue-502"
+    )
+
+    async def publish_malformed_result() -> None:
+        await asyncio.sleep(0.3)  # FastAPI가 subscribe를 끝낼 시간을 준다
+        publisher = app_redis_client_module.get_redis()
+        try:
+            await publisher.publish(
+                prediction_result_channel(fixed_uuid.hex),
+                json.dumps({"task_id": fixed_uuid.hex, "ai_model": "some_model"}),
+            )
+        finally:
+            await publisher.aclose()
+
+    publish_task = asyncio.create_task(publish_malformed_result())
+    response = await client.post(
+        f"/api/v1/medical-records/{record_id}/predictions", headers=headers
+    )
+    await publish_task
+
+    assert response.status_code == 502, response.text
+    assert "형식" in response.json()["detail"]

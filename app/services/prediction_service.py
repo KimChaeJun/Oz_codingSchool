@@ -118,9 +118,21 @@ class PredictionService:
 
             result_payload = await cls._wait_for_result(pubsub, task_id)
         finally:
-            await pubsub.unsubscribe(channel)
-            await pubsub.aclose()
-            await redis.aclose()
+            # 연결 자체가 안 됐을 때 정리 호출이 또 RedisError를 던지면
+            # 위에서 이미 발생한(또는 전파 중인) 예외를 덮어써 버린다.
+            # 각 정리 단계를 독립적으로 감싸 서로 막지 않게 한다.
+            try:
+                await pubsub.unsubscribe(channel)
+            except RedisError:
+                pass
+            try:
+                await pubsub.aclose()
+            except RedisError:
+                pass
+            try:
+                await redis.aclose()
+            except RedisError:
+                pass
 
         if "error" in result_payload:
             raise HTTPException(
@@ -128,8 +140,19 @@ class PredictionService:
                 detail="유효한 흉부 X-Ray 이미지를 읽을 수 없습니다.",
             )
 
-        is_pneumonia = bool(result_payload["is_pneumonia"])
-        pneumonia_probability = float(result_payload["pneumonia_probability"])
+        try:
+            is_pneumonia = bool(result_payload["is_pneumonia"])
+            pneumonia_probability = float(result_payload["pneumonia_probability"])
+            ai_model = str(result_payload["ai_model"])
+        except (KeyError, TypeError, ValueError) as exc:
+            # task_id는 일치했지만(정상 채널) 필수 필드가 없거나 타입이
+            # 잘못된 경우 — Worker 코드 변경/버전 불일치 등으로 이런 응답이
+            # 오면 KeyError로 500이 나는 대신 명확한 502로 알린다.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Worker 응답 형식이 올바르지 않습니다.",
+            ) from exc
+
         predicted_class_probability = (
             pneumonia_probability if is_pneumonia else 1.0 - pneumonia_probability
         )
@@ -140,7 +163,7 @@ class PredictionService:
             is_pneumonia=is_pneumonia,
             confidence=confidence_percentage,
             heatmap_url="",
-            ai_model=result_payload["ai_model"],
+            ai_model=ai_model,
         )
         db.add(result)
         await db.commit()
