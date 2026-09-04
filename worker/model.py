@@ -23,8 +23,9 @@ from PIL import Image
 from torch import nn
 from torchvision import models, transforms
 
+from shared.constants import MODEL_VERSION
+
 MODEL_PATH = Path(__file__).resolve().parent / "models" / "best_model_resnet18_pure.pth"
-MODEL_VERSION = "resnet18_daycon_pure_v1"
 
 # 학습 시 사용한 것과 동일한 전처리 (resnet18_pure_training.ipynb val_transform)
 IMAGE_SIZE = 224

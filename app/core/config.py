@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
+    PREDICTION_TIMEOUT_SECONDS: int = 15
 
     JWT_SECRET_KEY: SecretStr = SecretStr(
         "development-only-secret-key-change-in-production"

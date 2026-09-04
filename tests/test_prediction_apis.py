@@ -1,6 +1,8 @@
 import asyncio
+import logging
+import threading
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from io import BytesIO
@@ -22,8 +24,9 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import StaticPool
 
 import app.core.storage as storage_module
-import app.services.prediction_service as prediction_service_module
+import worker.main as worker_main_module
 import worker.model as worker_model_module
+import worker.redis_client as worker_redis_client_module
 from app.core.db.databases import Base, async_get_db
 from app.core.security import hash_password
 from app.main import app
@@ -39,6 +42,7 @@ from app.models import (
 )
 from app.repositories.ai_analysis_result_repository import AiAnalysisResultRepository
 from app.services.prediction_service import PredictionService
+from shared.constants import PREDICTION_TASK_QUEUE
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 
@@ -81,6 +85,37 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def redis_worker() -> Iterator[None]:
+    """실제 worker.main.handle_task를 백그라운드 스레드에서 돌려, Redis
+    Queue/Pub-Sub 라운드트립을 실제로 검증한다. 테스트 전용 워커 로직을
+    별도로 재구현하지 않고, 실제 worker/main.py를 그대로 재사용한다
+    (테스트만 통과하고 실제 Worker 통합은 어긋나는 걸 방지하기 위함).
+    monkeypatch로 worker.model.predict를 갈아끼우면, 이 스레드가 매
+    작업마다 worker_model.predict를 그때그때 조회해서 호출하므로
+    (모듈 속성 조회이지 이름 바인딩이 아니므로) 그대로 반영된다.
+    """
+    stop_event = threading.Event()
+
+    def run() -> None:
+        redis = worker_redis_client_module.get_redis()
+        while not stop_event.is_set():
+            item = redis.brpop(PREDICTION_TASK_QUEUE, timeout=0.5)
+            if item is None:
+                continue
+            _, raw_task = item
+            try:
+                worker_main_module.handle_task(redis, raw_task)
+            except Exception:
+                logging.getLogger(__name__).exception("테스트 워커 작업 처리 실패")
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    yield
+    stop_event.set()
+    thread.join(timeout=5)
 
 
 @pytest_asyncio.fixture
@@ -176,14 +211,14 @@ async def test_predict_pneumonia_creates_and_reuses_result(
     )
 
     call_count = 0
-    original_predict = prediction_service_module.predict
+    original_predict = worker_model_module.predict
 
     def counting_predict(*args, **kwargs):
         nonlocal call_count
         call_count += 1
         return original_predict(*args, **kwargs)
 
-    monkeypatch.setattr(prediction_service_module, "predict", counting_predict)
+    monkeypatch.setattr(worker_model_module, "predict", counting_predict)
 
     first = await client.post(
         f"/api/v1/medical-records/{record_id}/predictions", headers=headers
@@ -536,7 +571,7 @@ async def test_confidence_calculation_when_pneumonia_positive(
         is_pneumonia=True, pneumonia_probability=0.82371
     )
     monkeypatch.setattr(
-        prediction_service_module, "predict", lambda *_args: fixed_prediction
+        worker_model_module, "predict", lambda *_args: fixed_prediction
     )
 
     response = await client.post(
@@ -563,7 +598,7 @@ async def test_confidence_calculation_when_pneumonia_negative(
         is_pneumonia=False, pneumonia_probability=0.1237
     )
     monkeypatch.setattr(
-        prediction_service_module, "predict", lambda *_args: fixed_prediction
+        worker_model_module, "predict", lambda *_args: fixed_prediction
     )
 
     response = await client.post(
@@ -600,7 +635,7 @@ async def test_api_does_not_reapply_threshold(
         is_pneumonia=True, pneumonia_probability=0.4
     )
     monkeypatch.setattr(
-        prediction_service_module, "predict", lambda *_args: inconsistent_prediction
+        worker_model_module, "predict", lambda *_args: inconsistent_prediction
     )
 
     response = await client.post(
@@ -653,7 +688,7 @@ async def test_predict_uses_first_xray_image_from_relationship(
             is_pneumonia=False, pneumonia_probability=0.01
         )
 
-    monkeypatch.setattr(prediction_service_module, "predict", spy_predict)
+    monkeypatch.setattr(worker_model_module, "predict", spy_predict)
 
     response = await client.post(
         f"/api/v1/medical-records/{record_id}/predictions", headers=headers
@@ -837,6 +872,16 @@ async def test_predict_commit_failure_does_not_leave_orphan_or_corrupt_session(
 # =====================================================================
 
 
+@pytest.mark.xfail(
+    reason=(
+        "알려진 설계상 한계: (record_id, ai_model)에 DB-level UniqueConstraint가 "
+        "없어 동시 요청이 겹치면 중복 행이 생길 수 있음 (TODO.md 'Docker 단계' "
+        "표, docs/6일차_폐렴예측_API_설계.md 4.4/11장 참고). production code나 "
+        "migration을 추가하지 않고 재현만 남겨둠 — CI에서 진짜 회귀와 구분되도록 "
+        "xfail로 표시."
+    ),
+    strict=False,
+)
 @pytest.mark.asyncio
 async def test_concurrent_predict_requests_may_create_duplicate_rows(
     client: AsyncClient,
@@ -860,7 +905,7 @@ async def test_concurrent_predict_requests_may_create_duplicate_rows(
             is_pneumonia=False, pneumonia_probability=0.01
         )
 
-    monkeypatch.setattr(prediction_service_module, "predict", slow_predict)
+    monkeypatch.setattr(worker_model_module, "predict", slow_predict)
 
     responses = await asyncio.gather(
         client.post(f"/api/v1/medical-records/{record_id}/predictions", headers=headers),
