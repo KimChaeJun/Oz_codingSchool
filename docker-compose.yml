@@ -4,39 +4,75 @@ services:
       context: .
       dockerfile: app/Dockerfile
     entrypoint: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      # .env의 DB_HOST=localhost는 로컬(비-Docker) 개발용 값.
+      # 컨테이너 안에서는 mysql 서비스가 별도 컨테이너이므로,
+      # 컴포즈 네트워크상의 서비스명(mysql)으로 덮어써야 실제로 연결됨.
+      DB_HOST: mysql
+      # 위와 같은 이유로, Redis도 컴포즈 네트워크상의 서비스명(redis)으로 접속해야 함.
+      REDIS_HOST: redis
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app
-      - static_volume:/app/static
-      - media_volume:/app/media
+      - .:/app
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/healthcheck || exit 1"]
+      # 이미지에 curl이 설치되어 있지 않아, 베이스 이미지에 이미 포함된
+      # Python 표준 라이브러리(urllib)로 대체 (추가 패키지 설치 불필요)
+      test: ["CMD", "python3", "-c", "import urllib.request as u,sys; sys.exit(0) if u.urlopen('http://localhost:8000/healthcheck', timeout=3).status == 200 else sys.exit(1)"]
       interval: 5s
       timeout: 5s
       retries: 3
     depends_on:
       - mysql
+      - redis
 
   mysql:
     image: mysql:8.0
     volumes:
       - mysql_volume:/var/lib/mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      # DB_ROOT_PASSWORD가 .env에 없으면 빈 비밀번호로 조용히 기동되는 대신 즉시 에러로 중단시킴
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD가 .env에 설정되어 있지 않습니다. .env.example을 참고해 값을 추가해주세요.}
       MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
+      # DB_USER=root라서 MYSQL_USER/MYSQL_PASSWORD는 넣지 않음:
+      # 공식 mysql 이미지는 MYSQL_USER=root로 지정하면 초기화 스크립트가
+      # "root는 MYSQL_ROOT_PASSWORD로만 관리해야 한다"며 컨테이너를 즉시 실패시킴.
+      # root 계정은 위 MYSQL_ROOT_PASSWORD로 이미 생성되므로 별도 지정 불필요.
       MYSQL_PORT: ${DB_PORT}
     ports:
-      - "${DB_PORT}:3306"
+      - "3307:3306"
     healthcheck:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 20s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_volume:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+    volumes:
+      # fastapi가 저장한 media/ 디렉터리를 그대로 봐야 업로드된 이미지를 읽을 수 있음
+      - .:/app
+    depends_on:
+      - redis
+
 
 volumes:
   mysql_volume:
-  static_volume:
-  media_volume:
+  redis_volume:
