@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
+
 dependencies = [
     "alembic>=1.18.4",
     "asyncmy>=0.2.11",
@@ -15,6 +16,14 @@ dependencies = [
     "pyjwt>=2.13.0",
     "sqlalchemy[asyncio]>=2.0.49",
     "uuid6>=2025.0.1",
+    "redis>=6.0.0",
+]
+
+[project.optional-dependencies]
+ai-worker = [
+    "torch",
+    "torchvision",
+    "pillow",
 ]
 
 [dependency-groups]

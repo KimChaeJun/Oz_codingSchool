@@ -18,13 +18,10 @@ RUN pip install --no-cache-dir \
     pyjwt \
     "sqlalchemy[asyncio]" \
     uuid6 \
-    torch \
-    torchvision \
-    pillow
+    redis
 
 COPY app ./app
 COPY static ./static
-COPY worker ./worker
 COPY alembic.ini ./
 
 EXPOSE 8000
