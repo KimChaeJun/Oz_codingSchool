@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Python 캐시
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상환경 / 라이브러리 캐시
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# 환경변수 파일
+.env
+.env.*
+!.env.example
+
+# Docker 관련 설정 파일
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile
+.dockerignore
+
+# 문서
+docs/
+README.md
+
+# IDE 설정 파일
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store

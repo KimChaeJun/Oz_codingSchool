@@ -3,40 +3,85 @@ services:
     build:
       context: .
       dockerfile: app/Dockerfile
-    entrypoint: sh -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    entrypoint: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      # .env의 DB_HOST=localhost는 로컬(비-Docker) 개발용 값.
+      # 컨테이너 안에서는 mysql 서비스가 별도 컨테이너이므로,
+      # 컴포즈 네트워크상의 서비스명(mysql)으로 덮어써야 실제로 연결됨.
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:?DB_USER가 .env에 설정되어 있지 않습니다.}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD가 .env에 설정되어 있지 않습니다.}
+      DB_NAME: ${DB_NAME:?DB_NAME이 .env에 설정되어 있지 않습니다.}
+      # 위와 같은 이유로, Redis도 컴포즈 네트워크상의 서비스명(redis)으로 접속해야 함.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      PREDICTION_TIMEOUT_SECONDS: 3
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app
-      - static_volume:/app/static
-      - media_volume:/app/media
+      - .:/app
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/healthcheck || exit 1"]
+      # 이미지에 curl이 설치되어 있지 않아, 베이스 이미지에 이미 포함된
+      # Python 표준 라이브러리(urllib)로 대체 (추가 패키지 설치 불필요)
+      test: ["CMD", "python3", "-c", "import urllib.request as u,sys; sys.exit(0) if u.urlopen('http://localhost:8000/healthcheck', timeout=3).status == 200 else sys.exit(1)"]
       interval: 5s
       timeout: 5s
       retries: 3
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   mysql:
     image: mysql:8.0
     volumes:
       - mysql_volume:/var/lib/mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DB_NAME}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-      MYSQL_PORT: ${DB_PORT}
+      # DB_ROOT_PASSWORD가 .env에 없으면 빈 비밀번호로 조용히 기동되는 대신 즉시 에러로 중단시킴
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD가 .env에 설정되어 있지 않습니다. .env.example을 참고해 값을 추가해주세요.}
+      MYSQL_DATABASE: ${DB_NAME:?DB_NAME이 .env에 설정되어 있지 않습니다.}
+      # 애플리케이션 전용 일반 사용자를 생성한다. DB_USER에는 root가 아닌
+      # 계정을 지정해야 하며, root 암호는 DB_ROOT_PASSWORD로 별도 관리한다.
+      MYSQL_USER: ${DB_USER:?DB_USER가 .env에 설정되어 있지 않습니다.}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD가 .env에 설정되어 있지 않습니다.}
     ports:
-      - "${DB_PORT}:3306"
+      - "3307:3306"
     healthcheck:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 20s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_volume:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+    volumes:
+      # fastapi가 저장한 media/ 디렉터리를 그대로 봐야 업로드된 이미지를 읽을 수 있음
+      - .:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+
 
 volumes:
   mysql_volume:
-  static_volume:
-  media_volume:
+  redis_volume:
