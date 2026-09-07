@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from fastapi import HTTPException, status
 from redis.exceptions import RedisError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -59,11 +60,6 @@ class PredictionService:
     ) -> tuple[AiAnalysisResult, bool]:
         medical_record = await cls._require_medical_record(db, record_id)
 
-        # 동일 record_id + ai_model 조합에 DB-level UniqueConstraint는 없다
-        # (현재 alembic history가 multiple heads 상태라 이번 구현 범위에서는
-        # migration을 추가하지 않기로 결정함 — docs/6일차_폐렴예측_API_설계.md
-        # 4.4, 11장 참고). 아래 조회로 애플리케이션 레벨에서만 중복을 막으며,
-        # 동시 요청이 겹치면 중복 행이 생길 수 있는 한계가 남아있다.
         cached_result = await AiAnalysisResultRepository.get_by_record_and_model(
             db, record_id=record_id, ai_model=MODEL_VERSION
         )
@@ -110,13 +106,17 @@ class PredictionService:
                     "ai_model": MODEL_VERSION,
                 }
                 await redis.lpush(PREDICTION_TASK_QUEUE, json.dumps(payload))
+                result_payload = await cls._wait_for_result(pubsub, task_id)
             except RedisError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Redis 연결에 실패했습니다.",
                 ) from exc
-
-            result_payload = await cls._wait_for_result(pubsub, task_id)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Worker 응답 형식이 올바르지 않습니다.",
+                ) from exc
         finally:
             # 연결 자체가 안 됐을 때 정리 호출이 또 RedisError를 던지면
             # 위에서 이미 발생한(또는 전파 중인) 예외를 덮어써 버린다.
@@ -166,7 +166,24 @@ class PredictionService:
             ai_model=ai_model,
         )
         db.add(result)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError as exc:
+            # 두 요청이 캐시 조회를 동시에 통과해도 DB 유일 제약이 마지막
+            # 방어선이 된다. 충돌한 요청은 먼저 저장된 결과를 캐시로 반환한다.
+            await db.rollback()
+            cached_result = await AiAnalysisResultRepository.get_by_record_and_model(
+                db, record_id=record_id, ai_model=ai_model
+            )
+            if cached_result is not None:
+                return cached_result, True
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="동일 모델의 예측 결과가 이미 저장되었습니다.",
+            ) from exc
+        except Exception:
+            await db.rollback()
+            raise
         await db.refresh(result)
         return result, False
 

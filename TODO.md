@@ -8,11 +8,12 @@ Day별 문서에 흩어놓지 않고, Day(발생 시점), 항목, 중요도, 긴
 | Day | 항목 | 중요도 | 긴급도 | 해결 시점 | 상태 |
 |---|---|---|---|---|---|
 | Day8 | [Alembic 멀티헤드 정리](#alembic-멀티헤드-정리) | 높음 | 높음 | day10 시작 전 | 🟡 PR #27 리뷰 대기 |
-| Day6 | `(record_id, ai_model)` UniqueConstraint 추가 | - | - | Alembic 정리 후 | ⬜ 미착수 |
-| Day6 | `IntegrityError` 처리 | - | - | UniqueConstraint 후 | ⬜ 미착수 |
+| Day6 | `(record_id, ai_model)` UniqueConstraint 추가 | 높음 | 높음 | feature 병합 전 | ✅ 완료 (2026-09-07) |
+| Day6 | `IntegrityError` 처리 | 높음 | 높음 | UniqueConstraint 후 | ✅ 완료 (2026-09-07) |
 | Day10 | [Docker 이미지 용량 개선](#docker-이미지-용량-개선) | 보통 | 낮음 | 10일차 의존성 분리 | ✅ 완료 (2026-09-04) |
 | Day10 | [docker-compose.yml volumes 전략 재검토](#docker-composeyml-volumes-전략-재검토) | 보통 | 낮음 | 10일차 AI worker 전 | 🟡 dev 확정 · prod는 12일차 예정 |
-| - | `DB_USER=root` 사용 방식 재검토 | 높음 | 중간 | 12일차 배포 설정 전 | ⬜ 미착수 |
+| - | Compose DB 일반 사용자 설정 | 높음 | 중간 | feature 병합 전 | ✅ 완료 (2026-09-07) |
+| - | Compose 시작 시 Alembic 자동 적용 | 높음 | 높음 | feature 병합 전 | ✅ 완료 (2026-09-07) |
 
 #### Alembic 멀티헤드 정리
 - 2026-09-02 Docker 테스트 2(회원가입/로그인)에서 실제로 이 문제 때문에 막힘: 새 `mysql_volume`에 스키마가 없어 `alembic upgrade head`를 돌리려 했으나 head가 2개(`20260827_02`, `2a635f4b60e5`)라 명령 자체가 실패함. `alembic upgrade 20260827_02`로 리비전을 직접 지정해 우회 실행 후 테스트 통과.
@@ -45,18 +46,18 @@ Day별 문서에 흩어놓지 않고, Day(발생 시점), 항목, 중요도, 긴
 
 | Day | 항목 | 중요도 | 긴급도 | 해결 시점 | 상태 |
 |---|---|---|---|---|---|
-| Day6 | [동시 요청 중복 생성 방지 테스트](#동시-요청-중복-생성-방지-테스트) | - | - | UniqueConstraint 적용 후 | ⬜ 미착수 (xfail로 문서화, 2026-09-04) |
+| Day6 | [동시 요청 중복 생성 방지 테스트](#동시-요청-중복-생성-방지-테스트) | 높음 | 높음 | UniqueConstraint 적용 후 | ✅ 완료 (2026-09-07) |
 | Day6 | [API 전체 응답시간 측정(NFR-PRED-002, 3초 이내)](#api-전체-응답시간-측정) | - | - | - | ✅ 완료 (2026-09-04) |
 | Day8 | [Compose DB 통신 검증](#compose-db-통신-검증) | 높음 | 중간 | - | ✅ 완료 (2026-09-02) |
 | - | `app/apis/user.py` 미사용 코드 정리 검토 | 낮음 | 낮음 | 11일차 최종 정리 전 | ⬜ 미착수 |
 
 #### Compose DB 통신 검증
 - 회원가입·로그인·`GET /users/me`로 실제 DB 쿼리 성공 확인함. `/healthcheck`·`/docs`는 DB 연결 없이도 성공하므로 이것만으로는 검증되지 않아, 별도로 DB를 쓰는 API까지 호출해서 확인함.
-- **주의**: 검증 전 `docker compose exec fastapi uv run alembic upgrade 20260827_02`를 수동으로 실행해야 했음 — 새 `mysql_volume`엔 테이블이 없었고(`Table 'ai_health.users' doesn't exist`), `docker-compose.yml`엔 자동 마이그레이션이 없음. 이 수동 실행 없이는 DB를 쓰는 모든 API가 500 에러남. **2026-09-04 기준 여전히 자동화 안 됨** — day12 production compose(`entrypoint: sh -c "uv run alembic upgrade head && ..."`)에서 해결 예정.
+- **2026-09-07 해결**: FastAPI 컨테이너 시작 명령에 `alembic upgrade head`를 추가하고 MySQL healthcheck 통과 후 실행되도록 변경했다. 새 `mysql_volume`에서도 별도 수동 명령 없이 스키마가 준비된다.
 
 #### 동시 요청 중복 생성 방지 테스트
-- 2026-09-04, day10 Redis Queue/Worker 분리 작업 중 `tests/test_prediction_apis.py::test_concurrent_predict_requests_may_create_duplicate_rows`에 `@pytest.mark.xfail(strict=False)` 표시함. 여전히 미해결이지만, CI에서 이 실패가 "알려진 한계"임을 명확히 구분되게 함(진짜 회귀와 섞이지 않도록).
-- 근본 해결(UniqueConstraint + IntegrityError 처리)은 하지 않음 — day10 범위 밖.
+- 2026-09-07, `ai_analysis_results(record_id, ai_model)` 유일 제약 migration과 서비스의 `IntegrityError` 복구 처리를 추가했다.
+- `tests/test_prediction_apis.py::test_concurrent_predict_requests_create_single_row`가 두 동시 요청의 응답 ID와 DB 행 수가 모두 하나인지 검증한다.
 
 #### API 전체 응답시간 측정
 - 측정 환경: 2026-09-04, 실제 Docker 전체 스택(fastapi+ai-worker+redis+mysql), `curl -w`로 각 시나리오 **1회씩** 측정(반복 측정 아님 — 여러 번 측정한 평균은 아니라는 점 주의).

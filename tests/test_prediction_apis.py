@@ -15,6 +15,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
 from redis.asyncio import Redis as AsyncRedis
+from redis.exceptions import RedisError
 from sqlalchemy import BigInteger, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -746,7 +747,12 @@ def test_resolve_media_path_rejects_symlink_escaping_media_root(
     symlink_path = directory / "evil_symlink.jpg"
     if symlink_path.is_symlink() or symlink_path.exists():
         symlink_path.unlink()
-    symlink_path.symlink_to(outside_target)
+    try:
+        symlink_path.symlink_to(outside_target)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows에서 심볼릭 링크 생성 권한이 없습니다.")
+        raise
 
     try:
         with pytest.raises(ValueError):
@@ -873,31 +879,18 @@ async def test_predict_commit_failure_does_not_leave_orphan_or_corrupt_session(
 
 
 # =====================================================================
-# 12) 동시 요청 경쟁 상태 — 알려진 설계상 한계의 재현 시도
+# 12) 동시 요청 경쟁 상태 — DB 유일 제약과 충돌 복구 검증
 # =====================================================================
 
 
-@pytest.mark.xfail(
-    reason=(
-        "알려진 설계상 한계: (record_id, ai_model)에 DB-level UniqueConstraint가 "
-        "없어 동시 요청이 겹치면 중복 행이 생길 수 있음 (TODO.md 'Docker 단계' "
-        "표, docs/6일차_폐렴예측_API_설계.md 4.4/11장 참고). production code나 "
-        "migration을 추가하지 않고 재현만 남겨둠 — CI에서 진짜 회귀와 구분되도록 "
-        "xfail로 표시."
-    ),
-    strict=False,
-)
 @pytest.mark.asyncio
-async def test_concurrent_predict_requests_may_create_duplicate_rows(
+async def test_concurrent_predict_requests_create_single_row(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """알려진 설계상 한계: record_id+ai_model에 DB UniqueConstraint가 없으므로
-    동시 요청이 겹치면 중복 행이 생길 수 있다 (docs/6일차_..md 4.4/11장,
-    prediction_service.py 주석 참고). 이 테스트는 '올바른 동작(중복 없음)'을
-    기준으로 assert했다 — 재현되면 이 테스트는 의도적으로 FAIL한 채로 남는다.
-    이 문제를 해결하기 위해 production code나 migration을 추가하지 않는다."""
+    """두 요청이 캐시 조회를 동시에 통과해도 DB에는 한 행만 저장되고,
+    두 응답 모두 같은 예측 결과를 반환해야 한다."""
     await create_user(session_factory, email="staff@example.com", role=Role.STAFF)
     headers = auth_headers(await login(client, "staff@example.com"))
     record_id = await _create_patient_and_record_with_xray(
@@ -918,6 +911,7 @@ async def test_concurrent_predict_requests_may_create_duplicate_rows(
     )
     for response in responses:
         assert response.status_code in (200, 201), response.text
+    assert len({response.json()["id"] for response in responses}) == 1
 
     async with session_factory() as session:
         rows = (
@@ -928,12 +922,7 @@ async def test_concurrent_predict_requests_may_create_duplicate_rows(
             )
         ).all()
 
-    assert len(rows) == 1, (
-        f"UniqueConstraint가 없어 동시 요청 시 중복 행이 생겼습니다 "
-        f"(실제 {len(rows)}개). 알려진 설계상 한계이며, 이 테스트 실패는 "
-        "production code 버그 수정 대상이 아니라 의도적으로 남겨둔 한계의 "
-        "재현입니다 — docs/6일차_폐렴예측_API_설계.md 4.4/11장 참고."
-    )
+    assert len(rows) == 1
 
 
 # =====================================================================
@@ -1153,6 +1142,37 @@ async def test_predict_raises_503_when_redis_unreachable(
         )
 
     monkeypatch.setattr(prediction_service_module, "get_redis", get_unreachable_redis)
+
+    response = await client.post(
+        f"/api/v1/medical-records/{record_id}/predictions", headers=headers
+    )
+
+    assert response.status_code == 503, response.text
+    assert "Redis 연결" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_predict_raises_503_when_redis_disconnects_while_waiting(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """구독과 enqueue 이후 결과를 기다리는 중 Redis 연결이 끊겨도
+    내부 예외를 노출하지 않고 서비스 장애 응답을 반환해야 한다."""
+    await create_user(session_factory, email="staff@example.com", role=Role.STAFF)
+    headers = auth_headers(await login(client, "staff@example.com"))
+    record_id = await _create_patient_and_record_with_xray(
+        client, headers, chart_number="WAIT-DISCONNECT-CN-0001"
+    )
+
+    async def fail_while_waiting(_pubsub, _task_id: str) -> dict:
+        raise RedisError("simulated disconnect")
+
+    monkeypatch.setattr(
+        PredictionService,
+        "_wait_for_result",
+        staticmethod(fail_while_waiting),
+    )
 
     response = await client.post(
         f"/api/v1/medical-records/{record_id}/predictions", headers=headers

@@ -131,9 +131,9 @@ validation split 기준이며 실제 임상 환경이나 다른 X-Ray 장비의 
 
 - 하나의 `(record_id, ai_model)` 조합에는 하나의 결과만 존재하도록 설계한다.
 - 서비스 로직상으로는 추론 전에 기존 결과를 먼저 조회하는 방식으로 구현한다 (7장).
-- 설계 방향으로는 DB 레벨 `UniqueConstraint(record_id, ai_model)` 추가를
-  전제로 하되, **실제 Alembic migration은 이번 과제 2 범위에서 작성하지
-  않는다** (과제 3 또는 별도 DB 작업에서 처리).
+- DB 레벨 `UniqueConstraint(record_id, ai_model)`을
+  `20260907_03` migration으로 추가했다. 서비스의 사전 캐시 조회와 DB 제약을
+  함께 사용하며, 동시 INSERT 충돌은 기존 결과를 재조회해 반환한다.
 
 > **주의 — Alembic 멀티헤드 확인됨**: 이 프로젝트의 alembic history를
 > `alembic heads`로 직접 확인한 결과, 현재 **head가 2개**
@@ -153,29 +153,13 @@ validation split 기준이며 실제 임상 환경이나 다른 X-Ray 장비의 
 > 병합 migration은 빈 병합이 아니라 실제 스키마 통일 작업을 포함해야
 > 한다.
 
-**알려진 기술적 문제 — 동시 요청 시 중복 행 생성 (Day6에서는 미해결, 후속 계획 있음)**
+**동시 요청 중복 방지 — 2026-09-07 반영**
 
-DB에 `UniqueConstraint(record_id, ai_model)`가 없는 상태에서 동일
-`(record_id, ai_model)`로 두 요청이 거의 동시에 들어오면, 둘 다 "기존
-결과 없음"을 확인하고 각자 추론 후 INSERT에 성공해 **중복 행이 생길 수
-있다.** 이는 테스트(`tests/test_prediction_apis.py::test_concurrent_predict_requests_may_create_duplicate_rows`)로
-실제로 재현을 확인했다.
-
-Day6에서는 이 문제를 해결하지 않고 다음 후속 계획으로 넘긴다:
-
-1. **DB 환경 구성 단계 (Docker/MySQL 셋업 시)**: 실제 운영 DB(MySQL)
-   구성 단계에서 `(record_id, ai_model)`에 대한 `UniqueConstraint`
-   migration을 추가하고, 이때 함께 alembic 멀티헤드 문제를 먼저
-   해결한다. 서비스 레이어의 추론→저장 로직에도 동시 삽입 충돌
-   (`IntegrityError`) 발생 시 기존 결과를 재조회해 반환하는 처리를
-   함께 검토/구현한다.
-2. **QA 단계**: 동일 진료기록·동일 모델에 대한 동시 요청(부하 테스트
-   또는 반복 동시 호출)으로 실제로 중복 행이 더 이상 생기지 않는지
-   검증한다. 검증 방법은 `test_concurrent_predict_requests_may_create_duplicate_rows`와
-   동일한 접근(동시 POST 후 행 개수 확인)을 운영 DB 환경에서 재실행하는
-   것으로 한다.
-
-이번 Day6 production code는 이 후속 계획과 무관하게 수정하지 않았다.
+동일 `(record_id, ai_model)` 요청이 동시에 캐시 조회를 통과하더라도 DB의
+유일 제약이 중복 INSERT를 차단한다. 충돌한 요청은 rollback 후 먼저 저장된
+결과를 조회해 `200 OK`로 반환한다. 자동 테스트
+`test_concurrent_predict_requests_create_single_row`에서 동시 POST 응답 ID와
+최종 DB 행 수가 모두 하나인지 검증한다.
 
 ---
 
@@ -334,10 +318,8 @@ record_id
   취급하고 새로 추론한다. 추후 모델을 교체/개선하면 `MODEL_VERSION`
   문자열을 바꾸는 것만으로 기존 결과와 구분된다.
 - 서비스 레이어는 추론 전에 반드시 기존 결과를 먼저 조회한다 (7장).
-- DB 레벨 `UniqueConstraint(record_id, ai_model)`을 추가하는 방향으로
-  설계하되, 실제 migration은 4.4에서 설명한 대로 이번 문서 범위 밖이다.
-  migration 없이 구현할 경우, 동시 요청이 겹치면 중복 행이 생길 수 있다는
-  한계가 남는다 (11장에 기록).
+- DB 레벨 `UniqueConstraint(record_id, ai_model)`과 서비스의
+  `IntegrityError` 복구를 적용해 동시 요청에서도 결과를 하나만 유지한다.
 
 ---
 
@@ -383,18 +365,17 @@ record_id
 - **heatmap_url**: 이번 범위에서 Hitmap을 생성하지 않으며, 컬럼이
   `NOT NULL`이라 빈 문자열로 저장 후 API에서 `null`로 변환한다. 컬럼
   자체를 nullable로 바꾸는 스키마 변경은 하지 않았다.
-- **중복 방지의 DB 레벨 보장 부재**: `UniqueConstraint`를 설계 방향으로만
-  잡았고 migration은 만들지 않았으므로, 현재 구현에서는 동시 요청 시
-  중복 행이 생길 가능성이 남아있다.
+- **중복 추론 가능성**: DB 유일 제약으로 중복 저장은 방지하지만, 두 요청이
+  캐시 조회를 동시에 통과하면 AI 추론 자체는 각각 수행될 수 있다. 추론
+  비용까지 한 번으로 제한하려면 분산 락이나 작업 상태 저장이 추가로 필요하다.
 - **label 매핑의 근거 성격**: `0=NORMAL, 1=PNEUMONIA`는 데이터셋 출처
   문서가 아니라, label 분포 통계 및 이미지 육안 확인이라는 정황 증거를
   근거로 이번 프로젝트가 확정한 값이다.
 - **모델 성능의 적용 범위**: Recall/Accuracy 수치는 팀이 학습에 사용한
   validation split 기준이며, 실제 병원 환경이나 다른 장비로 촬영된
   X-Ray에 대한 성능을 보장하지 않는다.
-- **Alembic 멀티헤드**: 4.4에서 설명한 대로 현재 head가 2개 존재하며,
-  이번 문서에서 제안한 스키마 변경(nullable 전환, UniqueConstraint 추가
-  등)을 실제로 적용하기 전에 별도로 해결이 필요하다.
+- **Alembic 계보**: 중복 초기 migration을 제거해 단일 head로 정리했으며,
+  `20260827_02` 뒤에 `20260907_03`을 연결해 유일 제약을 적용했다.
 
 ---
 

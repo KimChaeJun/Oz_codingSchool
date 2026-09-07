@@ -7,6 +7,7 @@ Redis Task Queue(prediction:tasks)에서 작업을 꺼내(BRPOP) 폐렴 예측�
 
 import json
 import logging
+import time
 from pathlib import Path
 
 from PIL import UnidentifiedImageError
@@ -22,6 +23,7 @@ MEDIA_ROOT = Path(__file__).resolve().parent.parent / "media"
 
 # BRPOP 대기 시간(초). 워커가 완전히 멈춰있지 않고 주기적으로 깨어나게 함.
 POLL_TIMEOUT_SECONDS = 5
+REDIS_RETRY_DELAY_SECONDS = 1
 
 
 def resolve_image_path(image_url: str) -> Path:
@@ -82,6 +84,7 @@ def main() -> None:
             # Redis 연결 문제 등으로 BRPOP 자체가 실패해도 워커 프로세스는
             # 죽지 않고 재시도한다 (예: 컨테이너 시작 순서상 일시적 연결 실패).
             logger.exception("BRPOP 실패, 재시도합니다")
+            time.sleep(REDIS_RETRY_DELAY_SECONDS)
             continue
 
         if item is None:
