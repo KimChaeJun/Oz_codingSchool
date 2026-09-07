@@ -80,3 +80,23 @@ def delete_xray_image(image_url: str) -> None:
     relative_path = image_url.removeprefix("/media/")
     file_path = MEDIA_ROOT / relative_path
     file_path.unlink(missing_ok=True)
+
+
+def resolve_media_path(image_url: str) -> Path:
+    """DB에 저장된 공개 media URL을 실제 파일 경로로 변환한다.
+
+    image_url을 그대로 이어붙이면 "../"가 섞여 있을 때 MEDIA_ROOT
+    바깥으로 벗어나는 경로 조작이 가능해지므로, 최종 경로가 MEDIA_ROOT
+    하위인지 검증한 뒤에만 반환한다.
+    """
+    if not image_url.startswith("/media/"):
+        raise ValueError(f"지원하지 않는 media 경로입니다: {image_url}")
+
+    media_root = MEDIA_ROOT.resolve()
+    relative_path = image_url.removeprefix("/media/")
+    file_path = (media_root / relative_path).resolve()
+
+    if not file_path.is_relative_to(media_root):
+        raise ValueError(f"media 저장소 범위를 벗어난 경로입니다: {image_url}")
+
+    return file_path
